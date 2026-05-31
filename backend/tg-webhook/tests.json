@@ -1,0 +1,23 @@
+{
+  "tests": [
+    {
+      "name": "Webhook ping GET",
+      "method": "GET",
+      "path": "/",
+      "expectedStatus": 200
+    },
+    {
+      "name": "Webhook OPTIONS CORS",
+      "method": "OPTIONS",
+      "path": "/",
+      "expectedStatus": 200
+    },
+    {
+      "name": "Telegram update empty body",
+      "method": "POST",
+      "path": "/",
+      "body": {},
+      "expectedStatus": 200
+    }
+  ]
+}
