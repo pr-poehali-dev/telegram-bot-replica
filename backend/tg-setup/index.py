@@ -64,6 +64,40 @@ def handler(event: dict, context) -> dict:
             "body": json.dumps(r.json()),
         }
 
+    if action == "get_chat":
+        username = params.get("username", "").strip().lstrip("@")
+        if not username:
+            return {"statusCode": 400, "headers": CORS_HEADERS, "body": json.dumps({"ok": False, "error": "username required"})}
+        r = requests.get(f"{TELEGRAM_API}/getChat", params={"chat_id": f"@{username}"}, timeout=10)
+        data = r.json()
+        if data.get("ok") and data.get("result"):
+            # Добавляем members_count для каналов/групп
+            chat_id = data["result"].get("id")
+            if data["result"].get("type") in ("channel", "supergroup", "group") and chat_id:
+                mc = requests.get(f"{TELEGRAM_API}/getChatMemberCount", params={"chat_id": chat_id}, timeout=5).json()
+                if mc.get("ok"):
+                    data["result"]["members_count"] = mc["result"]
+        return {"statusCode": 200, "headers": CORS_HEADERS, "body": json.dumps(data)}
+
+    if action == "search":
+        query = params.get("q", "").strip()
+        candidates = [query.replace(" ", "_"), query.replace(" ", ""), query.split()[0] if query else ""]
+        found = []
+        for c in set(candidates):
+            if not c:
+                continue
+            try:
+                r = requests.get(f"{TELEGRAM_API}/getChat", params={"chat_id": f"@{c}"}, timeout=5)
+                d = r.json()
+                if d.get("ok") and d.get("result"):
+                    info = d["result"]
+                    mc = requests.get(f"{TELEGRAM_API}/getChatMemberCount", params={"chat_id": info["id"]}, timeout=5).json()
+                    info["members_count"] = mc.get("result", "—")
+                    found.append(info)
+            except Exception:
+                pass
+        return {"statusCode": 200, "headers": CORS_HEADERS, "body": json.dumps({"ok": True, "results": found})}
+
     # По умолчанию — статистика для дашборда
     conn = get_db()
     cur = conn.cursor()

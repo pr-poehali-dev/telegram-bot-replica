@@ -1,5 +1,12 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Icon from "@/components/ui/icon";
+
+const SETUP_URL = "https://functions.poehali.dev/d7b1ad72-3cfe-4ddb-b937-8fbce93aaba1";
+
+async function apiCall(url: string) {
+  const res = await fetch(url);
+  return res.json();
+}
 
 type Section = "analysis" | "search" | "stats" | "segments" | "export" | "help";
 
@@ -59,14 +66,40 @@ function StatBar({ label, value, color }: { label: string; value: number; color:
 
 function AnalysisSection() {
   const [username, setUsername] = useState("");
-  const [searched, setSearched] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<null | { ok: boolean; info?: Record<string, unknown>; error?: string }>(null);
+
+  const doAnalyze = useCallback(async () => {
+    if (!username.trim()) return;
+    setLoading(true);
+    setResult(null);
+    try {
+      const clean = username.replace("@", "").trim();
+      const data = await apiCall(`${SETUP_URL}?action=get_chat&username=${encodeURIComponent(clean)}`);
+      if (data.ok && data.result) {
+        setResult({ ok: true, info: data.result });
+      } else {
+        setResult({ ok: false, error: "Профиль не найден или закрыт" });
+      }
+    } catch {
+      setResult({ ok: false, error: "Ошибка соединения" });
+    } finally {
+      setLoading(false);
+    }
+  }, [username]);
+
+  const info = result?.info as Record<string, unknown> | undefined;
+  const title = (info?.title || info?.first_name || username) as string;
+  const members = info?.members_count as number | undefined;
+  const description = (info?.description || "") as string;
+  const chatType = (info?.type || "") as string;
 
   return (
     <div className="space-y-4 animate-fade-up-1">
       <div className="glass rounded-xl p-5 border border-cyan-500/20">
         <div className="flex items-center gap-2 mb-4">
           <div className="w-2 h-2 rounded-full bg-cyan-400 pulse-dot" />
-          <span className="text-xs text-muted-foreground uppercase tracking-widest">Анализ профиля</span>
+          <span className="text-xs text-muted-foreground uppercase tracking-widest">Анализ профиля / канала</span>
         </div>
         <div className="flex gap-2">
           <div className="flex-1 relative">
@@ -74,75 +107,88 @@ function AnalysisSection() {
             <input
               value={username}
               onChange={e => setUsername(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && username && setSearched(true)}
-              placeholder="username"
+              onKeyDown={e => e.key === "Enter" && doAnalyze()}
+              placeholder="username или канал"
               className="w-full bg-secondary border border-border rounded-lg pl-7 pr-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-cyan-500/50 transition-colors"
             />
           </div>
           <button
-            onClick={() => username && setSearched(true)}
-            className="px-4 py-2.5 rounded-lg text-sm font-medium text-background transition-all hover:opacity-90 active:scale-95"
+            onClick={doAnalyze}
+            disabled={loading}
+            className="px-4 py-2.5 rounded-lg text-sm font-medium text-background transition-all hover:opacity-90 active:scale-95 disabled:opacity-60"
             style={{ background: "hsl(195,100%,50%)" }}
           >
-            Искать
+            {loading ? "..." : "Искать"}
           </button>
         </div>
+        <p className="text-[11px] text-muted-foreground mt-2">Работает с публичными профилями, каналами и группами</p>
       </div>
 
-      {searched && (
+      {loading && (
+        <div className="glass rounded-xl p-6 border border-cyan-500/20 flex items-center justify-center gap-3 animate-fade-in">
+          <div className="w-4 h-4 rounded-full border-2 border-cyan-400 border-t-transparent animate-spin" />
+          <span className="text-sm text-muted-foreground">Анализирую @{username}...</span>
+        </div>
+      )}
+
+      {result && !loading && result.ok && info && (
         <div className="glass rounded-xl p-5 border border-cyan-500/20 animate-fade-in space-y-4">
           <div className="flex items-center gap-3">
             <div className="w-12 h-12 rounded-full flex items-center justify-center text-lg font-display font-bold text-background"
               style={{ background: "linear-gradient(135deg, hsl(195,100%,50%), hsl(270,80%,65%))" }}>
-              {username[0]?.toUpperCase() || "U"}
+              {String(title)[0]?.toUpperCase() || "?"}
             </div>
             <div>
-              <div className="font-display font-semibold text-base text-foreground">@{username}</div>
-              <div className="text-xs text-muted-foreground">ID: 4872319 · Активен сегодня</div>
+              <div className="font-display font-semibold text-base text-foreground">{title}</div>
+              <div className="text-xs text-muted-foreground">
+                @{username} · {chatType === "private" ? "👤 Пользователь" : chatType === "channel" ? "📢 Канал" : "👥 Группа"}
+              </div>
             </div>
             <div className="ml-auto">
-              <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-emerald-500/15 text-emerald-400 border border-emerald-500/25">Реальный</span>
+              <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-emerald-500/15 text-emerald-400 border border-emerald-500/25">Публичный</span>
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-3">
-            {[
-              { label: "Сообщений", value: "3 241", icon: "MessageSquare", color: "cyan" },
-              { label: "Чатов", value: "47", icon: "Users", color: "violet" },
-              { label: "Медиа", value: "218", icon: "Image", color: "green" },
-            ].map((s, i) => {
-              const c = COLOR_MAP[s.color];
-              return (
-                <div key={i} className={`rounded-lg p-3 border ${c.border} ${c.bg}`}>
-                  <Icon name={s.icon} size={14} className={c.text + " mb-1"} />
-                  <div className={`text-lg font-display font-bold ${c.text}`}>{s.value}</div>
-                  <div className="text-[10px] text-muted-foreground">{s.label}</div>
-                </div>
-              );
-            })}
-          </div>
-
-          <div>
-            <div className="text-xs text-muted-foreground mb-2">История никнеймов</div>
-            <div className="flex flex-wrap gap-1.5">
-              {["@old_nick", "@prev_user", `@${username}`].map((n, i) => (
-                <span key={i} className="text-xs px-2 py-0.5 rounded-full font-medium bg-secondary text-muted-foreground border border-border">{n}</span>
-              ))}
+          {members !== undefined && (
+            <div className="grid grid-cols-3 gap-3">
+              {[
+                { label: "Участников", value: members.toLocaleString(), icon: "Users", color: "cyan" },
+                { label: "Тип", value: chatType === "channel" ? "Канал" : chatType === "supergroup" ? "Супергруппа" : chatType === "group" ? "Группа" : "Профиль", icon: "MessageSquare", color: "violet" },
+                { label: "Статус", value: "Активен", icon: "ShieldCheck", color: "green" },
+              ].map((s, i) => {
+                const c = COLOR_MAP[s.color];
+                return (
+                  <div key={i} className={`rounded-lg p-3 border ${c.border} ${c.bg}`}>
+                    <Icon name={s.icon} size={14} className={c.text + " mb-1"} />
+                    <div className={`text-base font-display font-bold ${c.text} truncate`}>{s.value}</div>
+                    <div className="text-[10px] text-muted-foreground">{s.label}</div>
+                  </div>
+                );
+              })}
             </div>
-          </div>
+          )}
 
-          <div>
-            <div className="text-xs text-muted-foreground mb-2">Публичные группы</div>
-            <div className="space-y-1.5">
-              {["Crypto Signals RU", "Python Developers", "OSINT Community"].map((g, i) => (
-                <div key={i} className="flex items-center gap-2 py-1.5 px-3 rounded-lg bg-secondary/50 text-sm">
-                  <div className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
-                  <span className="text-foreground/80">{g}</span>
-                  <span className="ml-auto text-xs text-muted-foreground">{[1240, 8920, 4310][i]} участн.</span>
-                </div>
-              ))}
+          {description && (
+            <div>
+              <div className="text-xs text-muted-foreground mb-1">Описание</div>
+              <div className="text-sm text-foreground/80 leading-relaxed bg-secondary/40 rounded-lg p-3">{description}</div>
             </div>
+          )}
+
+          <div className="flex items-center gap-2 text-xs text-muted-foreground pt-1 border-t border-border">
+            <Icon name="ShieldCheck" size={12} className="text-emerald-400" />
+            Данные получены из публичного API Telegram
           </div>
+        </div>
+      )}
+
+      {result && !loading && !result.ok && (
+        <div className="glass rounded-xl p-5 border border-orange-500/20 animate-fade-in">
+          <div className="flex items-center gap-2 text-orange-400 mb-1">
+            <Icon name="AlertCircle" size={15} />
+            <span className="text-sm font-medium">Не найдено</span>
+          </div>
+          <p className="text-sm text-muted-foreground">{result.error}. Попробуй точный @username публичного канала или группы.</p>
         </div>
       )}
 
@@ -150,31 +196,42 @@ function AnalysisSection() {
         <div className="text-xs text-muted-foreground mb-3 uppercase tracking-widest">Активность по времени суток</div>
         <ActivityChart />
       </div>
-
-      <div className="grid grid-cols-2 gap-3">
-        <div className="glass rounded-xl p-4 border border-violet-500/20">
-          <Icon name="Phone" size={14} className="text-violet-400 mb-2" />
-          <div className="text-xs text-muted-foreground mb-1">Телефон</div>
-          <div className="text-sm font-medium text-foreground/60">+7 *** ***-**-**</div>
-        </div>
-        <div className="glass rounded-xl p-4 border border-orange-500/20">
-          <Icon name="Clock" size={14} className="text-orange-400 mb-2" />
-          <div className="text-xs text-muted-foreground mb-1">Регистрация</div>
-          <div className="text-sm font-medium text-foreground/80">~2019 год</div>
-        </div>
-      </div>
     </div>
   );
 }
 
+interface ChatResult {
+  title?: string;
+  first_name?: string;
+  username?: string;
+  type?: string;
+  members_count?: number;
+  description?: string;
+}
+
 function SearchSection() {
   const [query, setQuery] = useState("");
-  const results = [
-    { name: "OSINT Russia", type: "канал", members: "12 400", active: true },
-    { name: "CyberSec Chat", type: "группа", members: "5 820", active: true },
-    { name: "DataLeaks RU", type: "группа", members: "3 100", active: false },
-    { name: "Digital Forensics", type: "канал", members: "9 700", active: true },
-  ];
+  const [loading, setLoading] = useState(false);
+  const [results, setResults] = useState<ChatResult[]>([]);
+  const [searched, setSearched] = useState(false);
+
+  const doSearch = useCallback(async (q?: string) => {
+    const searchQuery = (q ?? query).trim();
+    if (!searchQuery) return;
+    setLoading(true);
+    setSearched(true);
+    setResults([]);
+    try {
+      const data = await apiCall(`${SETUP_URL}?action=search&q=${encodeURIComponent(searchQuery)}`);
+      setResults(data.results || []);
+    } catch {
+      setResults([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [query]);
+
+  const typeLabel: Record<string, string> = { channel: "канал", supergroup: "супергруппа", group: "группа", private: "профиль" };
 
   return (
     <div className="space-y-4 animate-fade-up-1">
@@ -187,96 +244,160 @@ function SearchSection() {
           <input
             value={query}
             onChange={e => setQuery(e.target.value)}
-            placeholder="Ключевое слово..."
+            onKeyDown={e => e.key === "Enter" && doSearch()}
+            placeholder="@username канала или ключевое слово..."
             className="w-full bg-secondary border border-border rounded-lg px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-violet-500/50 transition-colors"
           />
           <div className="flex gap-2 flex-wrap">
-            {["OSINT", "маркетинг", "безопасность", "крипто"].map(tag => (
+            {["osint_community", "cybersecurity", "python", "crypto"].map(tag => (
               <button
                 key={tag}
-                onClick={() => setQuery(tag)}
+                onClick={() => { setQuery(tag); doSearch(tag); }}
                 className="text-xs px-2 py-0.5 rounded-full font-medium bg-violet-500/10 text-violet-400 border border-violet-500/25 hover:bg-violet-500/20 transition-colors cursor-pointer"
               >
-                {tag}
+                @{tag}
               </button>
             ))}
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            <select className="bg-secondary border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-violet-500/50">
-              <option>Любой тип</option>
-              <option>Каналы</option>
-              <option>Группы</option>
-            </select>
-            <select className="bg-secondary border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-violet-500/50">
-              <option>Любой язык</option>
-              <option>Русский</option>
-              <option>Английский</option>
-            </select>
-          </div>
-          <button className="w-full py-2.5 rounded-lg text-sm font-medium text-white transition-all hover:opacity-90"
+          <button
+            onClick={() => doSearch()}
+            disabled={loading}
+            className="w-full py-2.5 rounded-lg text-sm font-medium text-white transition-all hover:opacity-90 disabled:opacity-60"
             style={{ background: "hsl(270,80%,65%)" }}>
-            Найти
+            {loading ? "Поиск..." : "Найти"}
           </button>
         </div>
       </div>
 
-      <div className="space-y-2">
-        <div className="text-xs text-muted-foreground px-1">Результаты поиска</div>
-        {results.map((r, i) => (
-          <div key={i} className="glass glass-hover rounded-xl p-4 border border-border flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl flex items-center justify-center text-base font-display font-bold flex-shrink-0 text-white"
-              style={{ background: `linear-gradient(135deg, hsl(270,80%,${35 + i * 8}%), hsl(195,100%,${40 + i * 5}%))` }}>
-              {r.name[0]}
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-sm font-medium text-foreground truncate">{r.name}</div>
-              <div className="text-xs text-muted-foreground">{r.members} участн. · {r.type}</div>
-            </div>
-            <div className="flex items-center gap-2">
-              {r.active && <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />}
-              <Icon name="ChevronRight" size={14} className="text-muted-foreground" />
-            </div>
+      {loading && (
+        <div className="glass rounded-xl p-6 border border-border flex items-center justify-center gap-3 animate-fade-in">
+          <div className="w-4 h-4 rounded-full border-2 border-violet-400 border-t-transparent animate-spin" />
+          <span className="text-sm text-muted-foreground">Ищу в Telegram...</span>
+        </div>
+      )}
+
+      {searched && !loading && (
+        <div className="space-y-2">
+          <div className="text-xs text-muted-foreground px-1">
+            {results.length > 0 ? `Найдено: ${results.length}` : "Ничего не найдено"}
           </div>
-        ))}
-      </div>
+          {results.length === 0 && (
+            <div className="glass rounded-xl p-5 border border-border text-sm text-muted-foreground">
+              Попробуй точный @username публичного канала или группы.
+            </div>
+          )}
+          {results.map((r, i) => {
+            const name = r.title || r.first_name || r.username || "?";
+            return (
+              <div key={i} className="glass glass-hover rounded-xl p-4 border border-border flex items-center gap-3 animate-fade-in">
+                <div className="w-10 h-10 rounded-xl flex items-center justify-center text-base font-display font-bold flex-shrink-0 text-white"
+                  style={{ background: `linear-gradient(135deg, hsl(270,80%,${35 + i * 8}%), hsl(195,100%,${40 + i * 5}%))` }}>
+                  {name[0]?.toUpperCase()}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium text-foreground truncate">{name}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {r.members_count ? `${r.members_count.toLocaleString()} участн. · ` : ""}
+                    {typeLabel[r.type || ""] || r.type}
+                    {r.username ? ` · @${r.username}` : ""}
+                  </div>
+                </div>
+                <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 flex-shrink-0" />
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
 
+interface BotStats {
+  bot: { username: string; first_name: string };
+  stats: { total_users: number; total_queries: number; queries_24h: number; active_users_24h: number };
+  by_type: { type: string; count: number }[];
+  hourly: { hour: string; count: number }[];
+}
+
 function StatsSection() {
+  const [data, setData] = useState<BotStats | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    apiCall(SETUP_URL)
+      .then(d => setData(d))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  const s = data?.stats;
+  const metrics = [
+    { label: "Пользователей", value: s ? s.total_users.toLocaleString() : "—", sub: "всего в боте", icon: "Users", color: "cyan" },
+    { label: "Запросов", value: s ? s.total_queries.toLocaleString() : "—", sub: "выполнено всего", icon: "Zap", color: "violet" },
+    { label: "За 24 часа", value: s ? s.queries_24h.toLocaleString() : "—", sub: "запросов сегодня", icon: "BarChart3", color: "green" },
+    { label: "Активных", value: s ? s.active_users_24h.toLocaleString() : "—", sub: "за сутки", icon: "Activity", color: "orange" },
+  ];
+
+  const typeNames: Record<string, string> = { analyze: "Анализ профилей", search: "Поиск чатов" };
+
   return (
     <div className="space-y-4 animate-fade-up-1">
-      <div className="grid grid-cols-2 gap-3">
-        {[
-          { label: "Проанализировано", value: "184K", sub: "пользователей", icon: "Users", color: "cyan" },
-          { label: "Чатов в базе", value: "32K", sub: "публичных", icon: "MessageSquare", color: "violet" },
-          { label: "Запросов сегодня", value: "4 721", sub: "за 24 ч", icon: "Zap", color: "green" },
-          { label: "Точность", value: "98.4%", sub: "верификация", icon: "ShieldCheck", color: "orange" },
-        ].map((s, i) => {
-          const c = COLOR_MAP[s.color];
-          return (
-            <div key={i} className={`glass rounded-xl p-4 border ${c.border}`}>
-              <Icon name={s.icon} size={16} className={c.text + " mb-2"} />
-              <div className={`text-2xl font-display font-bold ${c.text}`}>{s.value}</div>
-              <div className="text-xs text-foreground/70 font-medium">{s.label}</div>
-              <div className="text-[10px] text-muted-foreground">{s.sub}</div>
-            </div>
-          );
-        })}
-      </div>
-
-      <div className="glass rounded-xl p-5 border border-border">
-        <div className="text-xs text-muted-foreground uppercase tracking-widest mb-4">Типы контента</div>
-        <div className="space-y-3">
-          <StatBar label="Текстовые сообщения" value={72} color="cyan" />
-          <StatBar label="Фото и видео" value={18} color="violet" />
-          <StatBar label="Голосовые" value={6} color="green" />
-          <StatBar label="Стикеры и GIF" value={4} color="orange" />
+      {loading && (
+        <div className="glass rounded-xl p-6 border border-border flex items-center justify-center gap-3">
+          <div className="w-4 h-4 rounded-full border-2 border-cyan-400 border-t-transparent animate-spin" />
+          <span className="text-sm text-muted-foreground">Загружаю статистику...</span>
         </div>
-      </div>
+      )}
+
+      {data && (
+        <>
+          <div className="glass rounded-xl p-3 border border-cyan-500/20 flex items-center gap-2">
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center"
+              style={{ background: "linear-gradient(135deg, hsl(195,100%,50%), hsl(270,80%,65%))" }}>
+              <Icon name="Bot" size={14} className="text-background" />
+            </div>
+            <div>
+              <span className="text-sm font-medium text-foreground">{data.bot.first_name}</span>
+              <span className="text-xs text-muted-foreground ml-1">@{data.bot.username}</span>
+            </div>
+            <div className="ml-auto flex items-center gap-1.5 text-xs text-emerald-400">
+              <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 pulse-dot" />
+              Online
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            {metrics.map((m, i) => {
+              const c = COLOR_MAP[m.color];
+              return (
+                <div key={i} className={`glass rounded-xl p-4 border ${c.border}`}>
+                  <Icon name={m.icon} size={16} className={c.text + " mb-2"} />
+                  <div className={`text-2xl font-display font-bold ${c.text}`}>{m.value}</div>
+                  <div className="text-xs text-foreground/70 font-medium">{m.label}</div>
+                  <div className="text-[10px] text-muted-foreground">{m.sub}</div>
+                </div>
+              );
+            })}
+          </div>
+
+          {data.by_type.length > 0 && (
+            <div className="glass rounded-xl p-5 border border-border">
+              <div className="text-xs text-muted-foreground uppercase tracking-widest mb-4">Типы запросов</div>
+              <div className="space-y-3">
+                {data.by_type.map((bt, i) => {
+                  const total = data.by_type.reduce((acc, x) => acc + x.count, 0);
+                  const pct = total > 0 ? Math.round((bt.count / total) * 100) : 0;
+                  const color = i === 0 ? "cyan" : i === 1 ? "violet" : "green";
+                  return <StatBar key={i} label={typeNames[bt.type] || bt.type} value={pct} color={color} />;
+                })}
+              </div>
+            </div>
+          )}
+        </>
+      )}
 
       <div className="glass rounded-xl p-5 border border-border">
-        <div className="text-xs text-muted-foreground uppercase tracking-widest mb-3">Топ активных часов</div>
+        <div className="text-xs text-muted-foreground uppercase tracking-widest mb-3">Активность по часам</div>
         <ActivityChart />
       </div>
 
@@ -286,7 +407,7 @@ function StatsSection() {
           <span className="text-xs text-muted-foreground uppercase tracking-widest">Системы онлайн</span>
         </div>
         <div className="grid grid-cols-3 gap-2">
-          {["Кэш Redis", "Webhook API", "Уведомления"].map((t, i) => (
+          {["Webhook", "БД", "Telegram API"].map((t, i) => (
             <div key={i} className="flex items-center gap-1.5 text-xs text-foreground/70">
               <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 pulse-dot" />
               {t}
